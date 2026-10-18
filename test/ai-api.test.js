@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { AiProviderError, planTask } from '../src/services/geminiService.js';
+import AiPlan from '../src/models/AiPlan.js';
 
 const validPlan = {
   summary: 'Build a portfolio website',
@@ -11,8 +12,30 @@ const validPlan = {
   steps: ['Choose a layout', 'Build the pages', 'Deploy the site']
 };
 
+test('AI plan model validates plan data and enables creation timestamps', async () => {
+  const document = new AiPlan({
+    description: 'Build a portfolio website',
+    ...validPlan
+  });
+  await document.validate();
+
+  assert.equal(AiPlan.schema.options.timestamps, true);
+  assert.equal(document.description, 'Build a portfolio website');
+
+  const invalidDocument = new AiPlan({
+    description: 'Build a portfolio website',
+    ...validPlan,
+    priority: 'urgent'
+  });
+  assert.equal(invalidDocument.validateSync().errors.priority.name, 'ValidatorError');
+});
+
 test('AI plan endpoint validates input and returns the requested structure', async () => {
-  const app = createApp({ planner: async () => validPlan });
+  const savedPlans = [];
+  const app = createApp({
+    planner: async () => validPlan,
+    planStore: { create: async (document) => savedPlans.push(document) }
+  });
 
   const empty = await request(app).post('/api/ai/plan-task').send({ description: '   ' });
   assert.equal(empty.status, 400);
@@ -22,6 +45,44 @@ test('AI plan endpoint validates input and returns the requested structure', asy
   });
   assert.equal(result.status, 200);
   assert.deepEqual(result.body, { success: true, plan: validPlan });
+  assert.deepEqual(savedPlans, [{
+    description: 'I need to build a portfolio website within three days.',
+    ...validPlan
+  }]);
+});
+
+test('AI endpoint does not save invalid plans and preserves provider status codes', async () => {
+  let saved = false;
+  const planStore = { create: async () => { saved = true; } };
+  const invalidApp = createApp({
+    planner: async () => ({ ...validPlan, priority: 'urgent' }),
+    planStore
+  });
+
+  const invalidPlan = await request(invalidApp).post('/api/ai/plan-task').send({ description: 'Plan this task' });
+  assert.equal(invalidPlan.status, 502);
+  assert.equal(saved, false);
+
+  const unconfiguredApp = createApp({
+    planner: async () => { throw new AiProviderError('missing credentials', 503); },
+    planStore
+  });
+  const unconfigured = await request(unconfiguredApp).post('/api/ai/plan-task').send({ description: 'Plan this task' });
+  assert.equal(unconfigured.status, 503);
+  assert.equal(saved, false);
+});
+
+test('AI endpoint returns a generic error when MongoDB cannot save the plan', async () => {
+  const app = createApp({
+    planner: async () => validPlan,
+    planStore: {
+      create: async () => { throw new Error('mongodb://credentials/provider response'); }
+    }
+  });
+
+  const result = await request(app).post('/api/ai/plan-task').send({ description: 'Plan this task' });
+  assert.equal(result.status, 500);
+  assert.deepEqual(result.body, { success: false, error: 'Unable to save generated task plan' });
 });
 
 test('Gemini service sends the documented request and parses a valid plan', async () => {

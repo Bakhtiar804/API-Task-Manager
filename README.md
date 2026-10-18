@@ -55,5 +55,6 @@ Valid statuses are `pending`, `in-progress`, and `completed`. Invalid ObjectIds 
 - `POST /api/ai/plan-task`
 - JSON body: `{ "description": "I need to build a portfolio website within three days." }`
 - Returns `{ "success": true, "plan": { "summary": "...", "priority": "high", "estimatedHours": 12, "steps": ["..."] } }`.
+- Successful plans are saved in the `aiplans` MongoDB collection with the original description and a `createdAt` timestamp. The app currently has no authentication middleware or user model, so plans are not associated with a user and no plans-list endpoint is exposed.
 
-AI errors return a generic message and do not reveal credentials or provider response bodies. A missing provider configuration returns `503`; upstream or malformed responses return `502`.
+AI errors return a generic message and do not reveal credentials or provider response bodies. A missing provider configuration returns `503`; upstream or malformed responses return `502`. MongoDB save failures return `500` with a generic error.

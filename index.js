@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import app from './src/app.js';
 import { connectDatabase } from './src/config/database.js';
+import dns from "node:dns";
 
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
 const port = Number(process.env.PORT) || 3000;
 
 try {
