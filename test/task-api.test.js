@@ -114,3 +114,21 @@ test('health check and task collection work without a trailing slash', async () 
   assert.equal(tasks.status, 200);
   assert.equal(tasks.body.success, true);
 });
+
+test('CORS allows requests from any origin and handles preflight requests', async () => {
+  const response = await request(app)
+    .get('/health')
+    .set('Origin', 'https://any-site.example');
+  const preflight = await request(app)
+    .options('/api/tasks')
+    .set('Origin', 'https://another-site.example')
+    .set('Access-Control-Request-Method', 'POST')
+    .set('Access-Control-Request-Headers', 'content-type, authorization');
+
+  assert.equal(response.headers['access-control-allow-origin'], '*');
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers['access-control-allow-origin'], '*');
+  assert.equal(preflight.headers['access-control-allow-methods'], 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+  assert.equal(preflight.headers['access-control-allow-headers'], 'content-type, authorization');
+  assert.match(preflight.headers.vary, /Access-Control-Request-Headers/i);
+});
