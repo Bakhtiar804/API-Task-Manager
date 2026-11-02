@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import request from 'supertest';
-import { createApp } from '../src/app.js';
+import { request, createApp, workspaceId } from '../testSupport.js';
 import { AiProviderError, planTask } from '../src/services/geminiService.js';
 import AiPlan from '../src/models/AiPlan.js';
 
@@ -13,7 +12,7 @@ const validPlan = {
 };
 
 test('AI plan model validates plan data and enables creation timestamps', async () => {
-  const document = new AiPlan({
+  const document = new AiPlan({ workspace: workspaceId,
     description: 'Build a portfolio website',
     ...validPlan
   });
@@ -22,7 +21,7 @@ test('AI plan model validates plan data and enables creation timestamps', async 
   assert.equal(AiPlan.schema.options.timestamps, true);
   assert.equal(document.description, 'Build a portfolio website');
 
-  const invalidDocument = new AiPlan({
+  const invalidDocument = new AiPlan({ workspace: workspaceId,
     description: 'Build a portfolio website',
     ...validPlan,
     priority: 'urgent'
@@ -47,7 +46,7 @@ test('AI plan endpoint validates input and returns the requested structure', asy
   assert.deepEqual(result.body, { success: true, plan: validPlan });
   assert.deepEqual(savedPlans, [{
     description: 'I need to build a portfolio website within three days.',
-    ...validPlan
+    ...validPlan, workspace: workspaceId
   }]);
 });
 
@@ -162,7 +161,7 @@ test('Gemini service rejects malformed provider output and handles upstream fail
 test('Gemini retries temporary unavailability and accepts short everyday task titles', async () => {
   let attempts = 0;
   const plan = await planTask('mobile panel change', {
-    apiKey: 'test-key', model: 'models/gemini-3.8-flash', sleep: async () => {},
+    apiKey: 'test-key', model: 'models/gemini-3.8-flash', maxRetries: 2, sleep: async () => {},
     fetchImpl: async (url, options) => {
       attempts++;
       assert.match(url, /models\/gemini-3.8-flash:generateContent$/);
@@ -182,7 +181,7 @@ test('provider failures have safe distinct codes and bounded retries', async () 
   for (const [upstream, code, expectedStatus, attempts] of [[503, 'AI_UNAVAILABLE', 503, 3], [429, 'AI_RATE_LIMITED', 429, 1], [403, 'AI_CREDENTIALS', 502, 1], [404, 'AI_MODEL_UNAVAILABLE', 502, 1]]) {
     let calls = 0;
     await assert.rejects(planTask('mobile panel change', {
-      apiKey: 'test-key', model: 'test-model', sleep: async () => {},
+      apiKey: 'test-key', model: 'test-model', maxRetries: 2, sleep: async () => {},
       fetchImpl: async () => { calls++; return { ok: false, status: upstream }; }
     }), error => error.code === code && error.status === expectedStatus);
     assert.equal(calls, attempts);
@@ -197,8 +196,22 @@ test('provider failures have safe distinct codes and bounded retries', async () 
 test('connection failures stop after three attempts and return a timeout code', async () => {
   let calls = 0;
   await assert.rejects(planTask('mobile panel change', {
-    apiKey: 'test-key', model: 'test-model', sleep: async () => {},
+    apiKey: 'test-key', model: 'test-model', maxRetries: 2, sleep: async () => {},
     fetchImpl: async () => { calls++; throw new Error('private connection data'); }
   }), error => error.status === 504 && error.code === 'AI_TIMEOUT');
   assert.equal(calls, 3);
+});
+
+test('default requests fail fast without silent retries and normalize provider priority', async () => {
+  let calls = 0;
+  await assert.rejects(planTask('mobile panel change', {
+    apiKey: 'test-key', model: 'gemini-3.5-flash-lite',
+    fetchImpl: async () => { calls++; return { ok: false, status: 503 }; }
+  }), error => error.code === 'AI_UNAVAILABLE');
+  assert.equal(calls, 1);
+  const result = await planTask('mobile panel change', {
+    apiKey: 'test-key', model: 'gemini-3.5-flash-lite',
+    fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ ...validPlan, priority: ' High ' }) }] } }] }) })
+  });
+  assert.equal(result.priority, 'high');
 });

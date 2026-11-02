@@ -55,7 +55,7 @@ export function createAiController(planner, planStore = AiPlan) {
     }
 
     try {
-      await planStore.create({ description: normalizedDescription, ...plan });
+      await planStore.create({ description: normalizedDescription, ...plan, workspace: request.workspaceId });
     } catch {
       return response.status(500).json({
         success: false,

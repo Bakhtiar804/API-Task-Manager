@@ -60,8 +60,16 @@ Valid statuses are `pending`, `in-progress`, and `completed`. Invalid ObjectIds 
 AI errors return a generic message and do not reveal credentials or provider response bodies. A missing provider configuration returns `503`; upstream or malformed responses return `502`. MongoDB save failures return `500` with a generic error.
 ## AI failure handling
 
-AI requests use a required response schema and a 15-second timeout per attempt. Temporary provider HTTP 500/502/503/504 responses and connection failures get at most two retries. Quota (429), credentials (401/403), and unavailable model (404) failures are not retried. Only safe error codes and messages reach the client; provider response bodies and credentials are never logged.
+AI requests use a required response schema, a 10-second timeout, and no automatic retries by default. The recommended and locally configured task model is gemini-3.5-flash-lite; set GEMINI_MODEL to that value in Render and redeploy. Quota (429), credentials (401/403), and unavailable model (404) failures are not retried. Only safe error codes and messages reach the client; provider response bodies and credentials are never logged.
 
 A 503 with `AI_UNAVAILABLE` means the provider is temporarily unavailable; it is distinct from missing configuration. `AI_RATE_LIMITED` indicates quota/rate limits, `AI_CREDENTIALS` indicates server credentials, and `AI_MODEL_UNAVAILABLE` indicates the configured model. The server does not invent a replacement plan when the provider fails.
 
 After changing backend code, redeploy the server on Render. The frontend uses the deployed API by default, so local server edits do not change its live behavior until deployment. Keep GEMINI_API_KEY and GEMINI_MODEL configured in Render's environment settings.
+
+## Private guest workspaces (no signup or recovery)
+
+Deploy this backend BEFORE the updated frontend. Each browser calls POST /api/workspaces once and stores the returned 256-bit secret token locally. MongoDB stores only its SHA-256 hash in the workspaces collection, with no expiry. All /api/tasks and /api/ai requests require Authorization: Bearer <token>; GET /api/workspace verifies browser access. The token is never placed in URLs. Missing or unknown tokens return 401. Cross-workspace task IDs return 404 for reads and mutations. Tasks and AI plans are associated with the verified workspace on the server; the client cannot supply ownership.
+
+Existing records without a workspace remain in MongoDB but are inaccessible through the public API. They are intentionally NOT assigned to the first visitor. An administrator can separately migrate specific old records to a verified workspace if desired. No automatic migration or deletion is performed.
+
+There is no recovery interface. Clearing browser/site storage or switching browser/device creates a new workspace and loses access to the old one. Use HTTPS in production. Anyone with a browser's token has access to that workspace; do not log or share tokens. There is no token export or recovery feature.

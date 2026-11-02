@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import mongoose from 'mongoose';
-import request from 'supertest';
-import { createApp } from '../src/app.js';
+import { request, createApp, workspaceId } from '../testSupport.js';
 import Task from '../src/models/Task.js';
 
 const app = createApp();
-const taskMethods = ['create', 'find', 'findById', 'findByIdAndUpdate', 'findByIdAndDelete'];
+const taskMethods = ['create', 'find', 'findOne', 'findOneAndUpdate', 'findOneAndDelete'];
 const originalMethods = Object.fromEntries(taskMethods.map((method) => [method, Task[method]]));
 let currentTask;
 
@@ -20,17 +19,17 @@ beforeEach(() => {
     };
     return currentTask;
   };
-  Task.find = () => ({ sort: async () => (currentTask ? [currentTask] : []) });
-  Task.findById = async (id) => currentTask?._id.toString() === id ? currentTask : null;
-  Task.findByIdAndUpdate = async (id, fields) => {
-    if (currentTask?._id.toString() !== id) {
+  Task.find = (query) => ({ sort: async () => (currentTask && currentTask.workspace === query.workspace ? [currentTask] : []) });
+  Task.findOne = async (query) => currentTask?._id.toString() === query._id && currentTask.workspace === query.workspace ? currentTask : null;
+  Task.findOneAndUpdate = async (query, fields) => {
+    if (currentTask?._id.toString() !== query._id || currentTask.workspace !== query.workspace) {
       return null;
     }
     currentTask = { ...currentTask, ...fields };
     return currentTask;
   };
-  Task.findByIdAndDelete = async (id) => {
-    if (currentTask?._id.toString() !== id) {
+  Task.findOneAndDelete = async (query) => {
+    if (currentTask?._id.toString() !== query._id || currentTask.workspace !== query.workspace) {
       return null;
     }
     const deletedTask = currentTask;
@@ -131,4 +130,19 @@ test('CORS allows requests from any origin and handles preflight requests', asyn
   assert.equal(preflight.headers['access-control-allow-methods'], 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
   assert.equal(preflight.headers['access-control-allow-headers'], 'content-type, authorization');
   assert.match(preflight.headers.vary, /Access-Control-Request-Headers/i);
+});
+test('tasks reject past due dates on create and update while allowing today and no-date edits', async () => {
+  const past = await request(app).post('/api/tasks').send({ title: 'Past date', dueDate: '2000-01-01' });
+  assert.equal(past.status, 400);
+  assert.match(past.body.error, /today or a future date/);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Karachi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const created = await request(app).post('/api/tasks').send({ title: 'Today', dueDate: today });
+  assert.equal(created.status, 201);
+  const id = created.body.task._id;
+  const update = await request(app).put(`/api/tasks/${id}`).send({ dueDate: '2000-01-01' });
+  assert.equal(update.status, 400);
+  const statusUpdate = await request(app).put(`/api/tasks/${id}`).send({ status: 'completed' });
+  assert.equal(statusUpdate.status, 200);
+  const cleared = await request(app).put(`/api/tasks/${id}`).send({ dueDate: null });
+  assert.equal(cleared.status, 200);
 });

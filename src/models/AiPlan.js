@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 
 const aiPlanSchema = new mongoose.Schema({
+  workspace: { type: mongoose.Schema.Types.ObjectId, ref: 'Workspace', required: true, index: true, select: false },
   description: {
     type: String,
     required: [true, 'Description is required'],

@@ -35,6 +35,15 @@ function validateTaskFields(body, { partial = false } = {}) {
     return 'At least one task field must be provided';
   }
 
+  if (body.dueDate) {
+    const dateKey = (date) => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Karachi', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(date);
+    if (dateKey(new Date(body.dueDate)) < dateKey(new Date())) {
+      return 'Due date must be today or a future date';
+    }
+  }
+
   return null;
 }
 
@@ -53,7 +62,7 @@ export async function createTask(request, response, next) {
   }
 
   try {
-    const task = await Task.create(request.body);
+    const task = await Task.create({ ...request.body, workspace: request.workspaceId });
     return response.status(201).json({ success: true, task });
   } catch (error) {
     return next(error);
@@ -62,7 +71,7 @@ export async function createTask(request, response, next) {
 
 export async function getTasks(request, response, next) {
   try {
-    const tasks = await Task.find().sort({ createdAt: -1 });
+    const tasks = await Task.find({ workspace: request.workspaceId }).sort({ createdAt: -1 });
     return response.status(200).json({ success: true, count: tasks.length, tasks });
   } catch (error) {
     return next(error);
@@ -75,7 +84,7 @@ export async function getTask(request, response, next) {
   }
 
   try {
-    const task = await Task.findById(request.params.id);
+    const task = await Task.findOne({ _id: request.params.id, workspace: request.workspaceId });
     if (!task) {
       return response.status(404).json({ success: false, error: 'Task not found' });
     }
@@ -96,7 +105,7 @@ export async function updateTask(request, response, next) {
   }
 
   try {
-    const task = await Task.findByIdAndUpdate(request.params.id, request.body, {
+    const task = await Task.findOneAndUpdate({ _id: request.params.id, workspace: request.workspaceId }, request.body, {
       new: true,
       runValidators: true
     });
@@ -115,7 +124,7 @@ export async function deleteTask(request, response, next) {
   }
 
   try {
-    const task = await Task.findByIdAndDelete(request.params.id);
+    const task = await Task.findOneAndDelete({ _id: request.params.id, workspace: request.workspaceId });
     if (!task) {
       return response.status(404).json({ success: false, error: 'Task not found' });
     }

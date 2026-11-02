@@ -17,6 +17,8 @@ function parsePlan(content) {
     throw new AiProviderError('AI returned malformed JSON');
   }
 
+  if (plan && typeof plan.priority === 'string') plan.priority = plan.priority.trim().toLowerCase();
+
   const valid = plan
     && typeof plan.summary === 'string'
     && plan.summary.trim().length > 0
@@ -41,10 +43,10 @@ function parsePlan(content) {
 
 export async function planTask(description, {
   apiKey = process.env.GEMINI_API_KEY,
-  model = process.env.GEMINI_MODEL,
+  model = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
   fetchImpl = globalThis.fetch,
   sleep = delay,
-  maxRetries = 2
+  maxRetries = 0
 } = {}) {
   apiKey = apiKey?.trim();
   model = model?.trim().replace(/^models\//, '');
@@ -58,7 +60,7 @@ export async function planTask(description, {
   try {
     response = await fetchImpl(endpoint, {
       method: 'POST',
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(10000),
       headers: {
         'x-goog-api-key': apiKey,
         'content-type': 'application/json'
@@ -72,6 +74,7 @@ export async function planTask(description, {
         contents: [{ role: 'user', parts: [{ text: description }] }],
         generationConfig: {
           temperature: 0.2,
+          maxOutputTokens: 1200,
           responseMimeType: 'application/json',
           responseSchema: {
             type: 'OBJECT',

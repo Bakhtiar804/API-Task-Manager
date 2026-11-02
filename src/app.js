@@ -4,8 +4,10 @@ import AiPlan from './models/AiPlan.js';
 import { createAiRouter } from './routes/aiRoutes.js';
 import taskRoutes from './routes/taskRoutes.js';
 import { planTask } from './services/geminiService.js';
+import Workspace from './models/Workspace.js';
+import { createWorkspace, workspaceAccess } from './middleware/workspace.js';
 
-export function createApp({ planner = planTask, planStore = AiPlan } = {}) {
+export function createApp({ planner = planTask, planStore = AiPlan, workspaceStore = Workspace } = {}) {
   const app = express();
 
   app.use((request, response, next) => {
@@ -28,6 +30,9 @@ export function createApp({ planner = planTask, planStore = AiPlan } = {}) {
   app.get('/health', (request, response) => {
     response.status(200).json({ success: true, status: 'ok' });
   });
+  app.post('/api/workspaces', createWorkspace(workspaceStore));
+  app.use('/api', workspaceAccess(workspaceStore));
+  app.get('/api/workspace', (request, response) => response.json({ success: true, workspace: { id: request.workspaceId } }));
   app.use('/api/tasks', taskRoutes);
   app.use('/api/ai', createAiRouter(planner, planStore));
   app.use(express.static(fileURLToPath(new URL('../../public/', import.meta.url))));
