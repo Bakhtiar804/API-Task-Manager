@@ -159,3 +159,46 @@ test('Gemini service rejects malformed provider output and handles upstream fail
     /HTTP 503/
   );
 });
+test('Gemini retries temporary unavailability and accepts short everyday task titles', async () => {
+  let attempts = 0;
+  const plan = await planTask('mobile panel change', {
+    apiKey: 'test-key', model: 'models/gemini-3.8-flash', sleep: async () => {},
+    fetchImpl: async (url, options) => {
+      attempts++;
+      assert.match(url, /models\/gemini-3.8-flash:generateContent$/);
+      const body = JSON.parse(options.body);
+      assert.equal(body.contents[0].parts[0].text, 'mobile panel change');
+      assert.ok(body.generationConfig.responseSchema.required.includes('estimatedHours'));
+      assert.ok(options.signal);
+      if (attempts < 3) return { ok: false, status: 503 };
+      return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(validPlan) }] } }] }) };
+    }
+  });
+  assert.equal(attempts, 3);
+  assert.deepEqual(plan, validPlan);
+});
+
+test('provider failures have safe distinct codes and bounded retries', async () => {
+  for (const [upstream, code, expectedStatus, attempts] of [[503, 'AI_UNAVAILABLE', 503, 3], [429, 'AI_RATE_LIMITED', 429, 1], [403, 'AI_CREDENTIALS', 502, 1], [404, 'AI_MODEL_UNAVAILABLE', 502, 1]]) {
+    let calls = 0;
+    await assert.rejects(planTask('mobile panel change', {
+      apiKey: 'test-key', model: 'test-model', sleep: async () => {},
+      fetchImpl: async () => { calls++; return { ok: false, status: upstream }; }
+    }), error => error.code === code && error.status === expectedStatus);
+    assert.equal(calls, attempts);
+    const app = createApp({ planner: async () => { throw new AiProviderError('secret provider detail', expectedStatus, code); } });
+    const result = await request(app).post('/api/ai/plan-task').send({ description: 'mobile panel change' });
+    assert.equal(result.status, expectedStatus);
+    assert.equal(result.body.code, code);
+    assert.ok(!JSON.stringify(result.body).includes('secret provider detail'));
+  }
+});
+
+test('connection failures stop after three attempts and return a timeout code', async () => {
+  let calls = 0;
+  await assert.rejects(planTask('mobile panel change', {
+    apiKey: 'test-key', model: 'test-model', sleep: async () => {},
+    fetchImpl: async () => { calls++; throw new Error('private connection data'); }
+  }), error => error.status === 504 && error.code === 'AI_TIMEOUT');
+  assert.equal(calls, 3);
+});

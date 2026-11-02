@@ -27,6 +27,19 @@ export function createAiController(planner, planStore = AiPlan) {
     try {
       plan = await planner(normalizedDescription);
     } catch (error) {
+      const providerErrors = {
+        AI_UNAVAILABLE: [503, 'AI service is temporarily unavailable. Please try again shortly.'],
+        AI_RATE_LIMITED: [429, 'AI provider quota or rate limit reached. Please try again later.'],
+        AI_CREDENTIALS: [502, 'AI provider credentials need attention on the server.'],
+        AI_MODEL_UNAVAILABLE: [502, 'The configured AI model is unavailable. Update the server model setting.'],
+        AI_TIMEOUT: [504, 'AI service did not respond in time. Please try again.'],
+        AI_REQUEST_REJECTED: [502, 'AI provider rejected the server request. Check the server configuration.']
+      };
+      if (Object.hasOwn(providerErrors, error.code)) {
+        const [status, message] = providerErrors[error.code];
+        console.error('AI provider failure:', error.code);
+        return response.status(status).json({ success: false, code: error.code, error: message });
+      }
       const status = error.status === 503 ? 503 : 502;
       return response.status(status).json({
         success: false,

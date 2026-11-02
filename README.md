@@ -58,3 +58,10 @@ Valid statuses are `pending`, `in-progress`, and `completed`. Invalid ObjectIds 
 - Successful plans are saved in the `aiplans` MongoDB collection with the original description and a `createdAt` timestamp. The app currently has no authentication middleware or user model, so plans are not associated with a user and no plans-list endpoint is exposed.
 
 AI errors return a generic message and do not reveal credentials or provider response bodies. A missing provider configuration returns `503`; upstream or malformed responses return `502`. MongoDB save failures return `500` with a generic error.
+## AI failure handling
+
+AI requests use a required response schema and a 15-second timeout per attempt. Temporary provider HTTP 500/502/503/504 responses and connection failures get at most two retries. Quota (429), credentials (401/403), and unavailable model (404) failures are not retried. Only safe error codes and messages reach the client; provider response bodies and credentials are never logged.
+
+A 503 with `AI_UNAVAILABLE` means the provider is temporarily unavailable; it is distinct from missing configuration. `AI_RATE_LIMITED` indicates quota/rate limits, `AI_CREDENTIALS` indicates server credentials, and `AI_MODEL_UNAVAILABLE` indicates the configured model. The server does not invent a replacement plan when the provider fails.
+
+After changing backend code, redeploy the server on Render. The frontend uses the deployed API by default, so local server edits do not change its live behavior until deployment. Keep GEMINI_API_KEY and GEMINI_MODEL configured in Render's environment settings.
